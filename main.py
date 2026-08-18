@@ -11,7 +11,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# .env ফাইল থেকে Environment Variables লোড করার চেষ্টা করা (Local testing-এর জন্য)
+# .env ফাইল থেকে Environment Variables লোড করার জন্য (Local testing)
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -24,24 +24,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Environment Variables থেকে টোকেন সংগ্রহ
+# Environment Variables থেকে ডাটা রিড করা
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GITHUB_REPO_URL = "https://raw.githubusercontent.com/NikhilKain/vyxel-apps/main/apps.json"
 
-# Render Free Tier-এর জন্য হেলথ চেক সার্ভার
+# Render Free Tier-এর জন্য HTTP Health Check Server
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Vyxel Telegram Bot is running!")
+        self.wfile.write(b"Vyxel Telegram Bot is active and healthy!")
+
+    def log_message(self, format, *args):
+        # Render-এর লগে অতিরিক্ত HTTP রিকোয়েস্ট লগ বন্ধ রাখা
+        return
 
 def run_health_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    logger.info(f"Starting Health-Check server on port {port}...")
     server.serve_forever()
 
-# GitHub থেকে অ্যাপ না পাওয়া গেলে ব্যাকআপ ডেটা
+# GitHub থেকে প্রজেক্ট রেসপন্স না পেলে ব্যাকআপ ডেটা
 FALLBACK_APPS = {
     "mobile": [
         {
@@ -66,7 +71,7 @@ FALLBACK_APPS = {
 }
 
 def fetch_apps_from_github():
-    """GitHub থেকে অ্যাপের JSON ডাটা ফেচ করে"""
+    """GitHub repository থেকে অ্যাপস এর তালিকা লোড করে"""
     try:
         response = requests.get(GITHUB_REPO_URL, timeout=10)
         if response.status_code == 200:
@@ -76,7 +81,7 @@ def fetch_apps_from_github():
     return FALLBACK_APPS
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """স্টার্ট কমান্ড এবং মেইন মেনু হ্যান্ডলার"""
+    """বটের /start কমান্ড ও মেইন মেনু"""
     keyboard = [
         [
             InlineKeyboardButton("📱 Mobile Apps", callback_data="cat_mobile"),
@@ -100,7 +105,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.message.edit_text(welcome_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """বাটন ক্লিকে অ্যাপের বিবরণ ও স্ক্রিনশট দেখানোর লজিক"""
+    """বাটনে ক্লিক করার পর অ্যাপ ডাটা ও স্ক্রিনশট প্রদর্শনের লজিক"""
     query = update.callback_query
     await query.answer()
     
@@ -151,7 +156,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown"
                 )
             except Exception as e:
-                logger.error(f"Failed to send image: {e}")
+                logger.error(f"Failed to send screenshot: {e}")
                 await context.bot.send_message(
                     chat_id=query.message.chat_id,
                     text=caption,
@@ -175,18 +180,24 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN environment variable is missing! Please check your .env file or Render settings.")
+        logger.error("BOT_TOKEN environment variable is missing!")
         return
 
-    # Render-এর জন্য হেলথ চেক থ্রেড চালুকরণ
-    Thread(target=run_health_server, daemon=True).start()
+    # Render Health-check Server চালুকরণ
+    health_thread = Thread(target=run_health_server, daemon=True)
+    health_thread.start()
 
+    # Telegram Bot Application তৈরি
     app = Application.builder().token(BOT_TOKEN).build()
+
+    # Handlers যোগ করা
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_click))
 
     logger.info("Bot started successfully...")
-    app.run_polling()
+    
+    # Polling চালু করা (Render Safe Configuration)
+    app.run_polling(drop_pending_updates=True, close_loop=False)
 
 if __name__ == "__main__":
     main()
