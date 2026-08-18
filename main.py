@@ -1,6 +1,8 @@
 import os
 import logging
 import requests
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -9,17 +11,37 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# Logging configuration
+# .env ফাইল থেকে Environment Variables লোড করার চেষ্টা করা (Local testing-এর জন্য)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Logging কনফিগারেশন
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Environment variables
+# Environment Variables থেকে টোকেন সংগ্রহ
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GITHUB_REPO_URL = "https://raw.githubusercontent.com/NikhilKain/vyxel-apps/main/apps.json"
 
-# Sample fallback data in case GitHub fetch fails or repository JSON is unavailable
+# Render Free Tier-এর জন্য হেলথ চেক সার্ভার
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Vyxel Telegram Bot is running!")
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
+# GitHub থেকে অ্যাপ না পাওয়া গেলে ব্যাকআপ ডেটা
 FALLBACK_APPS = {
     "mobile": [
         {
@@ -44,7 +66,7 @@ FALLBACK_APPS = {
 }
 
 def fetch_apps_from_github():
-    """Fetches app metadata dynamically from GitHub repository."""
+    """GitHub থেকে অ্যাপের JSON ডাটা ফেচ করে"""
     try:
         response = requests.get(GITHUB_REPO_URL, timeout=10)
         if response.status_code == 200:
@@ -54,7 +76,7 @@ def fetch_apps_from_github():
     return FALLBACK_APPS
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles /start command and renders the main category menu."""
+    """স্টার্ট কমান্ড এবং মেইন মেনু হ্যান্ডলার"""
     keyboard = [
         [
             InlineKeyboardButton("📱 Mobile Apps", callback_data="cat_mobile"),
@@ -78,12 +100,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.message.edit_text(welcome_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles category button interactions."""
+    """বাটন ক্লিকে অ্যাপের বিবরণ ও স্ক্রিনশট দেখানোর লজিক"""
     query = update.callback_query
     await query.answer()
     
     data = query.data
-    
     if data == "main_menu":
         await start(update, context)
         return
@@ -92,7 +113,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     category_key = data.replace("cat_", "")
     
     selected_apps = []
-    
     if category_key == "all":
         for cat in apps_data:
             selected_apps.extend(apps_data[cat])
@@ -109,7 +129,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.message.edit_text(f"🔍 Fetching {len(selected_apps)} application(s)... Please wait.")
 
-    # Loop through apps and send detailed information
     for app in selected_apps:
         name = app.get("name", "Unknown App")
         desc = app.get("description", "No description available.")
@@ -123,7 +142,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔗 [GitHub Source]({github_url}) | 📥 [Download Release]({download_url})"
         )
 
-        # If screenshots exist, attempt to send image preview
         if screenshots:
             try:
                 await context.bot.send_photo(
@@ -148,7 +166,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 disable_web_page_preview=False
             )
 
-    # Show Back Menu
     keyboard = [[InlineKeyboardButton("🔙 Back to Categories", callback_data="main_menu")]]
     await context.bot.send_message(
         chat_id=query.message.chat_id,
@@ -158,11 +175,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN environment variable is missing!")
+        logger.error("BOT_TOKEN environment variable is missing! Please check your .env file or Render settings.")
         return
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Render-এর জন্য হেলথ চেক থ্রেড চালুকরণ
+    Thread(target=run_health_server, daemon=True).start()
 
+    app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_click))
 
