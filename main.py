@@ -16,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Environment variables
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("8467354851:AAFAgC5EZW3pGVRvC6e-4suU88jNUXTPlgE")
 GITHUB_REPO_URL = "https://raw.githubusercontent.com/NikhilKain/vyxel-apps/main/apps.json"
 
 # Sample fallback data in case GitHub fetch fails or repository JSON is unavailable
