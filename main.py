@@ -11,24 +11,24 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# .env ফাইল থেকে Environment Variables লোড করার জন্য (Local testing)
+# Load environment variables from .env file for local testing
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
-# Logging কনফিগারেশন
+# Logging configuration
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Environment Variables থেকে ডাটা রিড করা
+# Fetch environment variables
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GITHUB_REPO_URL = "https://raw.githubusercontent.com/NikhilKain/vyxel-apps/main/apps.json"
 
-# Render Free Tier-এর জন্য HTTP Health Check Server
+# Lightweight HTTP Health Check Server for Render Free Web Service
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -37,16 +37,16 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Vyxel Telegram Bot is active and healthy!")
 
     def log_message(self, format, *args):
-        # Render-এর লগে অতিরিক্ত HTTP রিকোয়েস্ট লগ বন্ধ রাখা
+        # Silence HTTP request log spam in Render logs
         return
 
 def run_health_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    logger.info(f"Starting Health-Check server on port {port}...")
+    logger.info(f"Starting HTTP Health-Check server on port {port}...")
     server.serve_forever()
 
-# GitHub থেকে প্রজেক্ট রেসপন্স না পেলে ব্যাকআপ ডেটা
+# Fallback dataset in case GitHub fetch fails or is temporarily unavailable
 FALLBACK_APPS = {
     "mobile": [
         {
@@ -71,7 +71,7 @@ FALLBACK_APPS = {
 }
 
 def fetch_apps_from_github():
-    """GitHub repository থেকে অ্যাপস এর তালিকা লোড করে"""
+    """Fetches application catalog JSON from GitHub repository."""
     try:
         response = requests.get(GITHUB_REPO_URL, timeout=10)
         if response.status_code == 200:
@@ -81,7 +81,7 @@ def fetch_apps_from_github():
     return FALLBACK_APPS
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """বটের /start কমান্ড ও মেইন মেনু"""
+    """Handles /start command and renders the main interactive menu."""
     keyboard = [
         [
             InlineKeyboardButton("📱 Mobile Apps", callback_data="cat_mobile"),
@@ -105,7 +105,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.message.edit_text(welcome_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """বাটনে ক্লিক করার পর অ্যাপ ডাটা ও স্ক্রিনশট প্রদর্শনের লজিক"""
+    """Handles inline button clicks and displays apps with screenshots and descriptions."""
     query = update.callback_query
     await query.answer()
     
@@ -156,7 +156,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown"
                 )
             except Exception as e:
-                logger.error(f"Failed to send screenshot: {e}")
+                logger.error(f"Failed to send image: {e}")
                 await context.bot.send_message(
                     chat_id=query.message.chat_id,
                     text=caption,
@@ -183,21 +183,21 @@ def main():
         logger.error("BOT_TOKEN environment variable is missing!")
         return
 
-    # Render Health-check Server চালুকরণ
+    # Start Health Check HTTP server in a daemon thread for Render
     health_thread = Thread(target=run_health_server, daemon=True)
     health_thread.start()
 
-    # Telegram Bot Application তৈরি
+    # Build Telegram Bot Application
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Handlers যোগ করা
+    # Add Command & Callback Query Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_click))
 
     logger.info("Bot started successfully...")
     
-    # Polling চালু করা (Render Safe Configuration)
-    app.run_polling(drop_pending_updates=True, close_loop=False)
+    # Run polling loop (Compatible with python-telegram-bot v21+)
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
